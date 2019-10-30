@@ -37,7 +37,7 @@ class Mux {
           my $queue = %!channels.keys.grep({ %!channels{$_}<open> == 1 }).first;
           if !$queue {
             # need to await
-            await |Promise.anyof( %!channels.keys.map({ %!channels{$_}<promise> }) );
+            await |Promise.anyof( %!channels.keys.map({ %!channels{$_}<promise> }).grep({ .defined && $_ ~~ Promise }) );
             $queue = %!channels.keys.grep({ %!channels{$_}<open> == 1 }).first;
           }
           await $!pause if $!pause ~~ Promise && $!pause.status ~~ Planned;
