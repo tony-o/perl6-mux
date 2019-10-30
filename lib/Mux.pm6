@@ -42,13 +42,13 @@ class Mux {
           }
           await $!pause if $!pause ~~ Promise && $!pause.status ~~ Planned;
           %!channels{$queue}<open> = 0;
-          %!channels{$queue}<promise> = Promise.new if %!channels{$queue}<promise>.status !~~ Planned;
+          %!channels{$queue}<promise> = Promise.new if %!channels{$queue}<promise> !~~ Promise || %!channels{$queue}<promise>.status !~~ Planned;
           %!channels{$queue}<channel>.send($elem);
         }
         $!demux-drain.emit: self;
         %!channels.keys.map({try %!channels{$_}<channel>.close;});
-        %!channels = ();
       }
+      await Promise.allof(|%!channels.keys.map({ %!channels{$_}<promise> ~~ Promise ?? %!channels{$_}<promise> !! Nil }).grep(*.defined));
     };
   }
 
