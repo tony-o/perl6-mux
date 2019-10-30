@@ -6,6 +6,7 @@ plan 6;
 
 my @expected = 1, 1, 1;
 my $fed = False;
+my $done = Promise.new;
 
 my $q = Mux.new(
   :callable(sub (Int() $want) {
@@ -20,19 +21,22 @@ $q.demux(-> $data {
 });
 
 $q.drain(-> $worker {
+  sleep 1; # queue drains too fast and causes flapping
   if !$fed {
     is @expected.elems, 1, "should have one more expecting in drain";
     $fed = True;
     $worker.feed: 1;
   } else {
     is @expected.elems, 0, 'should have no more expecting in drain';
+    try $done.keep; # Test doesn't wait for END
   }
 });
 
 $q.start: 1, 1;
 
+await $done;
+$q.close;
 $q.block;
-
 ok @expected.elems == 0, "should not be expecting anything else at end";
 
 # vim:syntax=perl6

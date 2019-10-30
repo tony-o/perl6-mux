@@ -1,6 +1,6 @@
 {
   "name": "Mux",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "perl": "6",
   "description": "parallel worker queue, designed to mux your work and demux your life",
   "auth": "github:tony-o",

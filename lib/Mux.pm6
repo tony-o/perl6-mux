@@ -1,3 +1,9 @@
+my @open;
+
+END {
+  for @open -> $mux { $mux.block; }
+};
+
 class Mux {
   has @!queue;
   has $!callable;
@@ -7,8 +13,9 @@ class Mux {
   has $!demux-error;
   has $!demux-drain;
   has $!pause;
-  has @!controller;
-  has $!controller-loop;
+  has $!controller;
+  has $!fed;
+  has $!closing;
 
   submethod BUILD(Callable() :$!callable, :@!queue = [], Int :$!channels = ($*SCHEDULER.max_threads / 1.5).Int) {
     warn 'Asking for more channels than provided by scheduler (asked for: ' ~ $!channels ~ ')'
@@ -17,15 +24,86 @@ class Mux {
     $!demux       = Supplier.new;
     $!demux-error = Supplier.new;
     $!demux-drain = Supplier.new;
+    $!fed         = Promise.new;
+    $!closing     = False;
+    $!controller  = start {
+      while !$!closing {
+        await $!fed;
+        $!fed = Promise.new;
+        while @!queue.elems {
+          CATCH { default { .say; } }
+          self!build-channels;
+          my $elem  = @!queue.shift;
+          my $queue = %!channels.keys.grep({ %!channels{$_}<open> == 1 }).first;
+          if !$queue {
+            # need to await
+            await |Promise.anyof( %!channels.keys.map({ %!channels{$_}<promise> }) );
+            $queue = %!channels.keys.grep({ %!channels{$_}<open> == 1 }).first;
+          }
+          await $!pause if $!pause ~~ Promise && $!pause.status ~~ Planned;
+          %!channels{$queue}<open> = 0;
+          %!channels{$queue}<promise> = Promise.new if %!channels{$queue}<promise>.status !~~ Planned;
+          %!channels{$queue}<channel>.send($elem);
+        }
+        $!demux-drain.emit: self;
+        %!channels.keys.map({try %!channels{$_}<channel>.close;});
+        %!channels = ();
+      }
+    };
+  }
+
+  submethod DESTROY {
+    $!closing = True;
+    await $!controller;
   }
 
   submethod TWEAK(|) {
+    @open.push: self;
     self.start if @!queue.elems;
   }
 
+  method force-close {
+    $!closing = True;
+    try $!fed.keep;
+  }
+
+  method close {
+    $!closing = True;
+    try $!fed.keep if @!queue.elems == 0;
+  }
+
+  method !build-channels {
+    for 1 .. min(@!queue.elems, $!channels) -> $x is copy {
+      next if %!channels{"worker$x"}:exists && !%!channels{"worker$x"}<channel>.closed;
+      %!channels{"worker$x"} = %(
+        id      => "worker$x",
+        channel => Channel.new,
+        promise => Promise.new,
+        open    => 1,
+      );
+      %!channels{"worker$x"}<thread> = start {
+        react { whenever %!channels{"worker$x"}<channel> {
+          CATCH {
+            default {
+              $!demux-error.emit: $_;
+              %!channels{"worker$x"}<open> = 1;
+              try %!channels{"worker$x"}<promise>.break;
+            }
+          };
+          my $elem = $_;
+          $!demux.emit: $!callable($elem);
+          %!channels{"worker$x"}<open> = 1;
+          %!channels{"worker$x"}<promise>.keep;
+        } }
+      };
+    }
+  }
+
   method feed(*@data) {
-    @!queue.push: |@data;
-    self.start;
+    unless $!closing {
+      @!queue.push: |@data;
+      self.start;
+    }
   }
 
   method pause {
@@ -44,56 +122,7 @@ class Mux {
   method start(*@queue) {
     CATCH { default { .say; } }
     @!queue.push(|@queue);
-    return if $!controller-loop ~~ Promise && $!controller-loop.status ~~ Planned;
-    await Promise.allof(|@!controller);
-    @!controller.push: start { #controller
-      $!controller-loop = Promise.new;
-      #build channels
-      for 1 .. min(@!queue.elems, $!channels) -> $x is copy {
-        %!channels{"worker$x"} = %(
-          id      => "worker$x",
-          channel => Channel.new,
-          promise => Promise.new,
-          open    => 1,
-        );
-        %!channels{"worker$x"}<thread> = start {
-          react { whenever %!channels{"worker$x"}<channel> {
-            CATCH {
-              default {
-                $!demux-error.emit: $_;
-                %!channels{"worker$x"}<open> = 1;
-                try %!channels{"worker$x"}<promise>.break;
-              }
-            };
-            my $elem = $_;
-            $!demux.emit: $!callable($elem);
-            %!channels{"worker$x"}<open> = 1;
-            %!channels{"worker$x"}<promise>.keep;
-          } }
-        };
-      }
-      while @!queue.elems {
-        my $elem = @!queue.shift;
-        CATCH { default { } };
-        my $queue = %!channels.keys.grep({ %!channels{$_}<open> == 1 }).first;
-        if !$queue {
-          # need to await
-          await |Promise.anyof( %!channels.keys.map({ %!channels{$_}<promise> }) );
-          $queue = %!channels.keys.grep({ %!channels{$_}<open> == 1 }).first;
-        }
-        await $!pause if $!pause ~~ Promise && $!pause.status ~~ Planned;
-        %!channels{$queue}<open> = 0;
-        %!channels{$queue}<promise> = Promise.new if %!channels{$queue}<promise>.status !~~ Planned;
-        %!channels{$queue}<channel>.send($elem);
-      }
-      $!controller-loop.keep;
-
-      await |Promise.allof(%!channels.keys.map({ %!channels{$_}<promise> }) );
-
-      for %!channels.keys { %!channels{$_}<channel>.close; }
-      %!channels = ();
-      start { $!demux-drain.emit: self; }
-    };
+    try $!fed.keep;
   }
 
   method demux(Callable() $callable) {
@@ -111,8 +140,6 @@ class Mux {
   method channels(--> Int) { $!channels; }
 
   method block {
-    while @!controller.elems {
-      await @!controller.shift;
-    }
+    await $!controller;
   }
 }

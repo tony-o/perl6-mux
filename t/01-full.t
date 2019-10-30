@@ -35,12 +35,12 @@ $q.feed: 10, 4, 2, 1;
 
 $q.pause for 1..500;
 $sleeping = True;
-sleep 30;
+sleep 20;
 $sleeping = False;
 $q.unpause for 1..500;
 
 ok $sleep-recv <= 2, "should not receive more values than channels during sleeping";
 
+$q.close;
 $q.block;
-
 # vim:syntax=perl6
