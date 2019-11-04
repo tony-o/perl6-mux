@@ -35,9 +35,10 @@ class Mux {
           self!build-channels;
           my $elem  = @!queue.shift;
           my $queue = %!channels.keys.grep({ %!channels{$_}<open> == 1 }).first;
-          if !$queue {
+          while !$queue {
             # need to await
             await |Promise.anyof( %!channels.keys.map({ %!channels{$_}<promise> }).grep({ .defined && $_ ~~ Promise }) );
+            self!build-channels;
             $queue = %!channels.keys.grep({ %!channels{$_}<open> == 1 }).first;
           }
           await $!pause if $!pause ~~ Promise && $!pause.status ~~ Planned;
@@ -46,7 +47,6 @@ class Mux {
           %!channels{$queue}<channel>.send($elem);
         }
         $!demux-drain.emit: self;
-        %!channels.keys.map({try %!channels{$_}<channel>.close;});
       }
       await Promise.allof(|%!channels.keys.map({ %!channels{$_}<promise> ~~ Promise ?? %!channels{$_}<promise> !! Nil }).grep(*.defined));
     };
