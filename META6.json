@@ -3,7 +3,7 @@
   "version": "0.0.3",
   "perl": "6",
   "description": "parallel worker queue, designed to mux your work and demux your life",
-  "auth": "github:tony-o",
+  "auth": "zef:tony-o",
   "authors": ["Tony O'Dell"],
   "depends": [],
   "test-depends": [],
