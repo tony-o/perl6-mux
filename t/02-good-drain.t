@@ -2,7 +2,7 @@
 use Mux;
 use Test;
 
-plan 6;
+plan 7;
 
 my @expected = 1, 1, 1;
 my $fed = False;

@@ -1,6 +1,6 @@
 {
   "name": "Mux",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "perl": "6",
   "description": "parallel worker queue, designed to mux your work and demux your life",
   "auth": "zef:tony-o",
